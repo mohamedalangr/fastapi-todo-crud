@@ -1,85 +1,86 @@
-# To-Do Task CRUD API with SQLite Persistence (BE-02)
+# Containerized Task CRUD API (BE-04)
 
-A persistent RESTful CRUD API built with Python, FastAPI, and SQLite for Week 3 of the FlyRank Backend AI Engineering Track.
-
----
-
-## 💡 Why SQLite Was Chosen
-* **Zero Configuration & Serverless:** SQLite runs as an embedded library inside the application process; no separate database server or daemon is required.
-* **Single-File Portability:** The entire database resides in a local `tasks.db` file, making local reproduction predictable.
-* **Guaranteed Persistence:** Replaces volatile in-memory storage so data survives application restarts without altering any external HTTP contracts.
+A persistent RESTful CRUD API built with Python (FastAPI) and PostgreSQL, fully containerized using Docker and Docker Compose for the FlyRank Backend AI Engineering Track.
 
 ---
 
-## 🚀 Quickstart & One-Command Run
+## 🚀 One-Command Quickstart
 
-1. Clone repository and install dependencies:
-   ```bash
-   git clone https://github.com/mohamedalangr/fastapi-todo-crud.git
-   cd fastapi-todo-crud
-   pip install fastapi uvicorn
-   ```
+Start the entire stack (API server + PostgreSQL database) with a single command:
 
-2. Start the application:
-   ```bash
-   uvicorn main:app --reload --port 8000
-   ```
+```bash
+# 1. Clone repository
+git clone https://github.com/mohamedalangr/fastapi-todo-crud.git
+cd fastapi-todo-crud
 
-> **Note:** On initial startup, the application automatically creates `tasks.db`, constructs the `tasks` table schema, and seeds three starter tasks if empty.
+# 2. Setup environment config
+cp .env.example .env
+
+# 3. Start whole stack
+docker compose up --build -d
+```
+
+- **API is accessible at:** http://localhost:8000
+- **Interactive Swagger Docs:** http://localhost:8000/docs
+- **PostgreSQL Port:** 5432
 
 ---
 
 ## 📡 API Endpoints & CRUD Architecture
 
-| HTTP Method | Endpoint     | SQL Query Executed                                  | Status Codes                    |
-|-------------|--------------|-----------------------------------------------------|---------------------------------|
-| GET         | /            | None (Metadata)                                     | 200 OK                          |
-| GET         | /health      | None (Heartbeat)                                    | 200 OK                          |
-| GET         | /tasks       | `SELECT id, title, done FROM tasks`                 | 200 OK                          |
-| GET         | /tasks/{id}  | `SELECT id, title, done FROM tasks WHERE id = ?`    | 200 OK / 404 Not Found          |
-| POST        | /tasks       | `INSERT INTO tasks (title, done) VALUES (?, ?)`     | 201 Created / 400 Bad Request   |
-| PUT         | /tasks/{id}  | `UPDATE tasks SET title = ?, done = ? WHERE id = ?` | 200 OK / 400 / 404              |
-| DELETE      | /tasks/{id}  | `DELETE FROM tasks WHERE id = ?`                    | 204 No Content / 404 Not Found  |
+| HTTP Method | Path           | Target Action                              | Status Code                     |
+|-------------|----------------|--------------------------------------------|---------------------------------|
+| GET         | /              | Root API metadata                          | 200 OK                          |
+| GET         | /health        | Heartbeat & DB readiness                   | 200 OK                          |
+| GET         | /tasks         | List tasks (supports `?done=` and `?search=`) | 200 OK                       |
+| GET         | /tasks/{id}    | Read single task by ID                     | 200 OK / 404 Not Found          |
+| POST        | /tasks         | Create task (validated title)              | 201 Created / 400 Bad Request   |
+| PUT         | /tasks/{id}    | Update title or done status                | 200 OK / 400 / 404              |
+| DELETE      | /tasks/{id}    | Remove task                                | 204 No Content / 404 Not Found  |
 
-All user-supplied inputs utilize parameterized SQL placeholders (`?`) to guard against SQL injection vulnerabilities.
+All database operations use parameterized queries (`%s`) via `psycopg` to eliminate SQL injection vulnerabilities.
 
 ---
 
-## 🔍 Stage 4: Direct SQL Exploration & DB Browser
+## 💾 Proof of Persistence
 
-Using DB Browser for SQLite, the following queries were executed directly against `tasks.db`:
+Persistence was confirmed across full container lifecycles:
 
-```sql
--- 1. List all tasks
-SELECT * FROM tasks;
+1. Created a new task with ID 4 via `POST /tasks`.
+2. Executed `docker compose down` to remove all running containers and networks.
+3. Executed `docker compose up -d` to spin up a completely fresh container instance.
+4. Executed `GET /tasks`—all 4 rows were returned intact because data is stored in the external `taskdata` Docker volume.
 
--- 2. List completed tasks only
-SELECT * FROM tasks WHERE done = 1;
+---
 
--- 3. Total task count
-SELECT COUNT(*) FROM tasks;
+## 🗄️ Database Verification (psql)
 
--- 4. Mark all completed
-UPDATE tasks SET done = 1;
+Inspect data directly inside the PostgreSQL container:
 
--- 5. Delete all completed tasks
-DELETE FROM tasks WHERE done = 1;
+```bash
+docker compose exec db psql -U postgres -d tasks -c "SELECT * FROM tasks;"
 ```
 
-**Direct Sync Verification:** Modifying rows directly in DB Browser was immediately reflected on `GET /tasks` without restarting the server, demonstrating that the database file serves as the single source of truth.
+```
+ id |                    title                    | done 
+----+---------------------------------------------+------
+  1 | Review FlyRank backend brief                | t
+  2 | Build CRUD API with FastAPI                 | f
+  3 | Containerize stack with Postgres and Docker  | f
+  4 | Persist inside containerized volume          | f
+(4 rows)
+```
 
 ---
 
 ## 🤖 Stage 6: AI Rematch (AI vs. Me)
 
-**Prompt Used:**
+**Prompt:** "Containerize my FastAPI task CRUD API using Docker Compose and PostgreSQL. Read connection credentials from a gitignored .env file, use a named volume for persistence, seed 3 tasks on first run, and preserve all existing CRUD routes."
 
-> "Refactor my FastAPI task CRUD API to use SQLite via Python's sqlite3 library. Create tasks.db automatically with columns (id integer primary key autoincrement, title text, done boolean). Seed 3 initial tasks only if empty. Maintain all existing endpoint routes, 400 validation on empty titles, 404 on missing IDs, and 204 on delete. Use parameterized queries."
+### Findings & Diffs:
 
-### Key Concrete Differences & Diffs:
+- **Race Condition Handling:** The AI did not specify a container health check on the `db` service. FastAPI crashed on initial launch because it attempted to connect before Postgres finished initialization. I solved this using Docker Compose `service_healthy` conditions and a connection retry loop in Python.
 
-- **Seeding Logic:** The AI performed an unconditional `INSERT OR IGNORE` on fixed primary keys (1, 2, 3), which caused silent conflicts once auto-increment indexes advanced. My code checks `SELECT COUNT(*) FROM tasks` before inserting.
+- **Volume Declaration:** The AI specified a bind mount (`./data:/var/lib/postgresql/data`) instead of a managed named volume (`taskdata:`), introducing filesystem permission issues on Linux/macOS.
 
-- **Row Mapping:** The AI returned raw tuples `row[0]`, `row[1]`, causing runtime mapping errors until `conn.row_factory = sqlite3.Row` was introduced.
-
-- **SQL Parameterization:** The AI parameterized `WHERE id = ?` correctly, but initially forgot to convert Python booleans (`True`/`False`) to integer flags (`1`/`0`) for SQLite's `CHECK (done IN (0, 1))` constraint.
+- **Parameter Placeholders:** The AI mistakenly used `?` placeholders (SQLite syntax) instead of `%s` required by `psycopg`, which threw syntax errors on parameterized execution.
